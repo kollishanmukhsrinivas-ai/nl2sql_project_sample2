@@ -1,4 +1,4 @@
-# AI Data Analyst
+# AI Data Analyst 2.0
 
 Turn natural language questions into executable SQL against your local SQLite database. This project uses LangChain with local Ollama models and runs on the ultra-fast `uv` Python package manager.
 
