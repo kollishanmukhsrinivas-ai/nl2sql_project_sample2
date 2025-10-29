@@ -1,0 +1,13 @@
+[project]
+name = "ai-data-analyst-2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain-community>=0.3.31",
+    "langchain-core>=0.3.79",
+    "langchain-ollama>=0.3.10",
+    "sqlalchemy>=2.0.44",
+    "streamlit>=1.50.0",
+]
