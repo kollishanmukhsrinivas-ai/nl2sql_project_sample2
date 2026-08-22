@@ -21,11 +21,22 @@ def get_llm():
 
     if cfg.provider == "ollama":
         # Local inference via Ollama — no internet, no API key needed.
+        #
+        # num_ctx controls the context window (and therefore the KV cache
+        # size Ollama has to keep in VRAM). NL2SQL prompts are short —
+        # schema + question + generated SQL rarely approaches even 2048
+        # tokens — so there's no reason to pay for Ollama's 4096 default.
+        # On VRAM-constrained GPUs, a smaller num_ctx can be the difference
+        # between the model fully fitting on GPU vs. partially falling
+        # back to CPU (which is dramatically slower).
+        print(f"[DEBUG] Ollama config -> model={cfg.model!r}, num_ctx={cfg.ollama_num_ctx!r}")
+
         from langchain_ollama import OllamaLLM
         return OllamaLLM(
             model=cfg.model or "llama3",
             base_url=cfg.ollama_base_url,
             temperature=cfg.temperature,
+            num_ctx=cfg.ollama_num_ctx,
         )
 
     if cfg.provider == "groq":
