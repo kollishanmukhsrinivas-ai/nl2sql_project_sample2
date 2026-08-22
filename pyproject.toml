@@ -1,7 +1,7 @@
 [project]
 name = "ai-data-analyst-2"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "NL2SQL app: local/remote DB + local/cloud LLM, driven by config"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -10,4 +10,13 @@ dependencies = [
     "langchain-ollama>=0.3.10",
     "sqlalchemy>=2.0.44",
     "streamlit>=1.50.0",
+    "python-dotenv>=1.0.0",
+    "pymysql>=1.1.0",
+    "psycopg2-binary>=2.9.9",
+    "pandas>=2.0.0",
 ]
+
+[project.optional-dependencies]
+groq = ["langchain-groq>=0.1.5"]
+openai = ["langchain-openai>=0.2.0"]
+anthropic = ["langchain-anthropic>=0.2.0"]
