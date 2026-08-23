@@ -1,0 +1,155 @@
+# Database Connection Guide — Local & Remote
+
+This app is 100% config-driven via `.env`. Switching databases (local ↔ remote, MySQL ↔ Postgres ↔ Oracle ↔ SQLite) never requires touching code — only `.env`.
+
+---
+
+## 1. How It Works
+
+- `app/config.py` reads `.env` into a `DatabaseConfig`.
+- `app/db/database_service.py` → `build_database_url()` turns that config into a SQLAlchemy connection string based on `DB_TYPE`.
+- Restart the app after any `.env` change (engine is cached — see Troubleshooting if it doesn't pick up changes).
+
+Supported today: `sqlite`, `mysql`, `postgresql`. Oracle requires one code addition (Section 6).
+
+---
+
+## 2. SQLite (local file, default)
+
+```
+DB_TYPE=sqlite
+DB_SQLITE_PATH=amazon.db
+```
+
+No host/user/password needed. Good for quick local testing only.
+
+---
+
+## 3. MySQL
+
+**Local:**
+```
+DB_TYPE=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=emp
+DB_USER=root
+DB_PASSWORD=yourpassword
+```
+
+**Remote (AWS RDS, PlanetScale, etc.):**
+```
+DB_TYPE=mysql
+DB_HOST=your-instance.rds.amazonaws.com
+DB_PORT=3306
+DB_NAME=emp
+DB_USER=admin
+DB_PASSWORD=yourpassword
+DB_SSL_MODE=require
+```
+
+Driver: `pymysql` (already in dependencies).
+
+---
+
+## 4. PostgreSQL
+
+**Local:**
+```
+DB_TYPE=postgresql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=emp
+DB_USER=postgres
+DB_PASSWORD=yourpassword
+```
+
+**Remote (Supabase, Neon, RDS):**
+```
+DB_TYPE=postgresql
+DB_HOST=your-instance.neon.tech
+DB_PORT=5432
+DB_NAME=emp
+DB_USER=admin
+DB_PASSWORD=yourpassword
+DB_SSL_MODE=require
+```
+
+Driver: `psycopg2` — install if missing:
+```bash
+pip install psycopg2-binary
+```
+
+---
+
+## 5. Oracle (not wired in yet — requires code change)
+
+**Install driver:**
+```bash
+pip install oracledb
+```
+
+**Add to `build_database_url()` in `app/db/database_service.py`:**
+```python
+if cfg.db_type == "oracle":
+    if not all([cfg.host, cfg.name, cfg.user]):
+        raise DatabaseConnectionError(
+            "Oracle config incomplete: DB_HOST, DB_NAME, DB_USER are required."
+        )
+    port = cfg.port or "1521"
+    return (
+        f"oracle+oracledb://{cfg.user}:{cfg.password or ''}"
+        f"@{cfg.host}:{port}/?service_name={cfg.name}"
+    )
+```
+
+**`.env` (e.g. Oracle Cloud Autonomous DB):**
+```
+DB_TYPE=oracle
+DB_HOST=your-oracle-host.oraclecloud.com
+DB_PORT=1521
+DB_NAME=your_service_name
+DB_USER=admin
+DB_PASSWORD=yourpassword
+```
+
+Note: `DB_NAME` here is Oracle's **service name**, not a database name (Oracle doesn't have "databases" the way MySQL/Postgres do — it has schemas/services). Also verify `app/db/schema_service.py` queries the right system tables (`ALL_TAB_COLUMNS`, not MySQL's `information_schema`) — Oracle introspection needs separate handling.
+
+---
+
+## 6. Test a connection directly (before running the app)
+
+```bash
+cd ~/project-drdl/nl2sql_project_sample2
+uv run python -c "from app.db.database_service import get_engine; get_engine(); print('Connected OK')"
+```
+
+If this fails, the error message tells you exactly what's wrong — see Section 7.
+
+---
+
+## 7. Troubleshooting — every likely failure and the fix
+
+| Error / Symptom | Likely Cause | Fix |
+|---|---|---|
+| `Could not connect to mysql database at <host>` | Wrong host, DB not running, or firewall blocking | Verify `DB_HOST`/`DB_PORT`; `telnet <host> <port>` or `nc -zv <host> <port>` to test reachability |
+| `Access denied for user 'x'@'y'` | Wrong username/password, or user not allowed to connect from your IP | Check credentials; for remote DBs, confirm the DB's firewall/security group allows your IP |
+| `Unknown database 'emp'` | `DB_NAME` typo, or DB not created yet | `SHOW DATABASES;` (MySQL) / `\l` (Postgres) to confirm exact name |
+| `Can't connect to MySQL server on '127.0.0.1'` | MySQL service not running locally | `sudo systemctl status mysql` (Linux) / check MySQL Workbench / `brew services list` (Mac) |
+| Connection works locally but not remote | Cloud DB security group/firewall doesn't whitelist your IP | Add your public IP (or `0.0.0.0/0` for testing only, never production) to the DB's inbound rules |
+| SSL error (`SSL connection error`, `certificate verify failed`) | Remote DB requires SSL, `DB_SSL_MODE` missing or wrong | Set `DB_SSL_MODE=require`; for strict cert validation, may need CA cert path (DB-provider-specific, check their docs) |
+| `ModuleNotFoundError: No module named 'psycopg2'` / `'pymysql'` / `'oracledb'` | Driver not installed | `pip install psycopg2-binary` / `pip install pymysql` / `pip install oracledb` |
+| Timeout / hangs forever | Wrong port, or network path blocked (VPN needed?) | Confirm port matches DB type default (3306 MySQL, 5432 Postgres, 1521 Oracle); check if DB requires VPN/bastion access |
+| App still uses old DB after changing `.env` | Engine is cached (`@lru_cache`) | Restart the Streamlit app fully — cache isn't cleared on file save. For code-level resets, call `reset_engine_cache()` |
+| `Too many connections` | Remote DB connection limit hit (common on free-tier cloud DBs) | Close other sessions, or reduce app restarts in quick succession |
+| Passwords with special characters break the URL | Unescaped characters like `@`, `#`, `%` in `DB_PASSWORD` | Rare edge case — SQLAlchemy usually handles this from env vars directly, but if manually building a URL string elsewhere, URL-encode the password |
+| Wrong data returned / stale schema | Schema changed remotely but app cached old schema description | Restart the app; `get_schema_description()` re-queries on every call, so this is almost always a stale-process issue, not a caching bug |
+| Read-only queries failing unexpectedly | DB user lacks even SELECT privileges | Grant at minimum: `GRANT SELECT ON emp.* TO 'user'@'%';` (adjust per DB type) |
+
+---
+
+## 8. Security Notes
+
+- Never commit `.env` to git — add it to `.gitignore`.
+- For remote/production DBs, create a **read-only** database user for this app — the app already blocks write SQL at the query-validation layer, but a read-only DB user is a second line of defense if that validation is ever bypassed.
+- Avoid `0.0.0.0/0` firewall rules beyond quick local testing.
