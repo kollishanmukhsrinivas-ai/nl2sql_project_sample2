@@ -100,3 +100,15 @@ def execute_readonly_query(sql: str, max_rows: int) -> tuple[list[str], list[tup
             return columns, [tuple(r) for r in rows]
     except SQLAlchemyError as exc:
         raise DatabaseConnectionError(f"Query execution failed: {exc}") from exc
+def explain_sql(sql: str) -> None:
+    """
+    Validates SQL is syntactically correct and references real
+    columns/tables by asking the DB to EXPLAIN it, without executing it.
+    Raises DatabaseConnectionError with the DB's exact error if invalid.
+    """
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(f"EXPLAIN {sql}"))
+    except SQLAlchemyError as exc:
+        raise DatabaseConnectionError(f"SQL validation failed: {exc}") from exc

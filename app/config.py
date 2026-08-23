@@ -44,6 +44,7 @@ class LLMConfig:
     model: str | None
     ollama_base_url: str
     ollama_num_ctx: int
+    ollama_keep_alive: str
     temperature: float
 
 
@@ -69,6 +70,7 @@ def load_llm_config() -> LLMConfig:
         # NL2SQL prompts are short (schema + question); 2048 is plenty and
         # keeps the KV cache small enough to fully fit small GPUs.
         ollama_num_ctx=int(_get("OLLAMA_NUM_CTX", "2048") or 2048),
+        ollama_keep_alive=_get("OLLAMA_KEEP_ALIVE", "5m"),
         temperature=float(_get("LLM_TEMPERATURE", "0") or 0),
     )
 

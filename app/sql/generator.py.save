@@ -1,0 +1,100 @@
+"""
+Natural-language question -> SQL, grounded in the live database schema.
+"""
+import re
+
+from langchain_core.prompts import ChatPromptTemplate
+
+from app.llm.llm_service import get_llm
+
+SYSTEM_PROMPT =  """You are an expert SQL generator for a {dialect} database.
+Given a database schema and a user question, generate a single valid,
+read-only SELECT SQL query that answers the question.
+
+Rules:
+- Only use the tables and columns provided in the schema below. Never invent columns or tables.
+- Use explicit JOINs (with ON conditions) when the question requires data from multiple tables.
+- Output ONLY the raw SQL query. No explanation, no markdown code fences, no <think> tags, no preamble.
+- The query must be a single statement (no semicolons, no multiple statements).
+- Never generate INSERT, UPDATE, DELETE, DROP, ALTER, or TRUNCATE statements.
+
+Column matching rules (very important):
+- Free-text / descriptive columns (e.g. reason, comments, notes, description,
+  address, remarks) NEVER use exact match (=). Always use LIKE '%keyword%'
+  with the core keyword extracted from the question, ignoring filler words
+  like "on purpose for", "reason of", "because of".
+- Categorical / enum columns (e.g. status, leave_type, department, gender)
+  DO use exact match (=) with one of the known values from the schema.
+- If a question describes a purpose, activity, or free-text concept (e.g.
+  "vacation", "personal reasons", "medical") rather than a known category
+  value, search the free-text column with LIKE, not the categorical column.
+
+Examples:
+Q: "employees who took leave for vacation"
+SQL: SELECT emp_id, reason FROM leaves WHERE reason LIKE '%vacation%'
+
+Q: "who is currently on sick leave"
+SQL: SELECT emp_id FROM leaves WHERE leave_type = 'Sick'
+
+Q: "employees whose leave request is pending"
+SQL: SELECT emp_id FROM leaves WHERE status = 'Pending'
+
+
+
+Multi-table column location rules (critical — frequent model errors here):
+- base_salary, bonus, allowance, salary_grade live ONLY in the `salaries`
+  table, never in `employees`. Always JOIN salaries to get these.
+- The `training` table has NO emp_id column — to link training to an
+  employee, JOIN through `employee_training` (emp_id, training_id).
+- Never join a department_id column to an emp_id column, or vice versa —
+  they are never the same key.
+
+MySQL syntax rules:
+- Every derived/sub-query table used in FROM must have an alias:
+  FROM (SELECT ...) AS some_alias
+k- Never use reserved words (rank, rows, row_number, order, group) as an
+  unquoted column alias — quote them with backticks or rename them
+  (e.g. use `salary_rank` instead of `rank`).
+- A window function's result (e.g. RANK() AS salary_rank) CANNOT be
+  filtered in the same-level WHERE clause. Always wrap it in an outer
+  subquery first: SELECT * FROM (SELECT ..., RANK() OVER (...) AS
+  salary_rank FROM ...) AS ranked WHERE ranked.salary_rank <= 2
+- When joining 3 or more tables, or self-joining the same table twice
+  (e.g. employees AS e JOIN employees AS m), ALWAYS qualify every single
+  column in SELECT/WHERE/ON with its table alias — never a bare column
+  name, to avoid ambiguous column errors.
+
+Superlative rule:
+- Questions like "the employee/department who has the most/least/
+  highest/lowest X" require ORDER BY X DESC (or ASC) LIMIT 1 — never
+  return all rows when the question asks for a single top/bottom result.
+
+Schema:
+{schema}"""
+ 
+
+_prompt_template = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    ("user", "Question: {question}\n\nSQL Query:"),
+])
+
+
+def _extract_text(response) -> str:
+    """Handles both plain string LLM responses (Ollama) and message objects (chat models)."""
+    return response.content if hasattr(response, "content") else str(response)
+
+
+def clean_sql_output(raw: str) -> str:
+    text = raw.strip()
+    # Strip <think>...</think> blocks some reasoning models emit
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Strip markdown code fences if the model adds them despite instructions
+    text = re.sub(r"```sql|```", "", text)
+    return text.strip()
+
+
+def generate_sql(question: str, schema: str, dialect: str = "SQL") -> str:
+    llm = get_llm()
+    chain = _prompt_template | llm
+    raw_response = chain.invoke({"schema": schema, "question": question, "dialect": dialect})
+    return clean_sql_output(_extract_text(raw_response))

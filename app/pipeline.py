@@ -14,7 +14,7 @@ from app.config import load_db_config, MAX_RESULT_ROWS
 from app.db.database_service import DatabaseConnectionError, execute_readonly_query
 from app.db.schema_service import get_schema_description
 from app.llm.llm_service import LLMConfigError
-from app.sql.generator import generate_sql
+from app.sql.generator import generate_sql_with_retry
 from app.sql.validator import SQLValidationError, validate_sql
 
 
@@ -38,7 +38,7 @@ def get_data_from_database(question: str) -> QueryResult:
 
     # 1. Schema retrieval (dynamic — whatever DB is currently configured)
     try:
-        schema = get_schema_description()
+        schema = get_schema_description(question)
     except DatabaseConnectionError as exc:
         return QueryResult(success=False, question=question, error=f"Database connection failed: {exc}")
 
@@ -46,7 +46,7 @@ def get_data_from_database(question: str) -> QueryResult:
 
     # 2. LLM: natural language -> SQL
     try:
-        sql = generate_sql(question, schema, dialect=dialect)
+        sql = generate_sql_with_retry(question, schema, dialect=dialect, max_retries=1)
     except LLMConfigError as exc:
         return QueryResult(success=False, question=question, error=f"LLM configuration error: {exc}")
     except Exception as exc:  # LLM/network failures of any kind

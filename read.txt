@@ -153,3 +153,6 @@ If this fails, the error message tells you exactly what's wrong — see Section 
 - Never commit `.env` to git — add it to `.gitignore`.
 - For remote/production DBs, create a **read-only** database user for this app — the app already blocks write SQL at the query-validation layer, but a read-only DB user is a second line of defense if that validation is ever bypassed.
 - Avoid `0.0.0.0/0` firewall rules beyond quick local testing.
+
+
+to run -uv run streamlit run frontend.py
