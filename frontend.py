@@ -1,4 +1,6 @@
+import html
 import time
+from dataclasses import dataclass, field
 
 import pandas as pd
 import streamlit as st
@@ -265,6 +267,24 @@ st.markdown(
 
 
 # ============================================================
+# FALLBACK RESULT (for exceptions raised outside the pipeline)
+# ============================================================
+
+@dataclass
+class _ErrorResult:
+    """Mirrors the shape of whatever get_data_from_database() normally
+    returns (success/error/sql/rows/columns), so a Python exception can
+    flow through the exact same display_results()/history path instead
+    of being handled as a special case that then vanishes on rerun."""
+
+    success: bool = False
+    error: str = ""
+    sql: str = None
+    rows: list = field(default_factory=list)
+    columns: list = field(default_factory=list)
+
+
+# ============================================================
 # SESSION STATE
 # ============================================================
 
@@ -279,7 +299,7 @@ if "pending_question" not in st.session_state:
 # CHART HELPERS
 # ============================================================
 
-def _flatten_html(html: str) -> str:
+def _flatten_html(html_str: str) -> str:
     """Collapse a multi-line, indented HTML/SVG string into a single line.
 
     Streamlit still runs st.markdown() content through a CommonMark
@@ -298,8 +318,19 @@ def _flatten_html(html: str) -> str:
     on separate source lines don't get glued together
     (e.g. y2="160"stroke="#e5e7eb" would be invalid).
     """
-    lines = [line.strip() for line in html.strip().splitlines()]
+    lines = [line.strip() for line in html_str.strip().splitlines()]
     return " ".join(line for line in lines if line)
+
+
+def _escape(value) -> str:
+    """HTML-escape any value pulled from query results before it gets
+    interpolated into an f-string destined for unsafe_allow_html=True.
+
+    Column names and cell values come from the user's database via
+    LLM-generated SQL, so they're not trusted input. Without this, a
+    value containing a stray '<' or '"' can break out of an attribute
+    or tag and inject arbitrary HTML/JS into the page."""
+    return html.escape(str(value), quote=True)
 
 
 def _format_number(value) -> str:
@@ -390,9 +421,10 @@ def render_bar_chart(df: pd.DataFrame, label_column: str, value_column: str, tot
         label = str(chart_df.iloc[0][label_column])
         if len(label) > 26:
             label = label[:26] + "…"
+        label = _escape(label)
         value = chart_df.iloc[0][value_column]
         icon = _pick_metric_icon(value_column)
-        metric_label = _prettify_column_name(value_column)
+        metric_label = _escape(_prettify_column_name(value_column))
         st.markdown(
             _flatten_html(
                 f"""
@@ -418,6 +450,7 @@ def render_bar_chart(df: pd.DataFrame, label_column: str, value_column: str, tot
         label = str(row[label_column])
         if len(label) > 22:
             label = label[:22] + "…"
+        label = _escape(label)
 
         value = row[value_column]
         is_negative = value < 0
@@ -439,7 +472,7 @@ def render_bar_chart(df: pd.DataFrame, label_column: str, value_column: str, tot
 
     note = ""
     if total_rows > shown:
-        note = f'<div class="chart-note">Showing top {shown} of {total_rows} rows, ranked by {value_column}.</div>'
+        note = f'<div class="chart-note">Showing top {shown} of {total_rows} rows, ranked by {_escape(value_column)}.</div>'
 
     final_html = f'<div class="quick-chart">{note}{"".join(rows_html)}</div>'
     st.markdown(_flatten_html(final_html), unsafe_allow_html=True)
@@ -455,6 +488,16 @@ def render_trend_chart(df: pd.DataFrame, label_column: str, value_column: str):
     chart_df[value_column] = pd.to_numeric(chart_df[value_column], errors="coerce")
     chart_df["_parsed_date"] = pd.to_datetime(chart_df[label_column], errors="coerce")
     chart_df = chart_df.dropna(subset=[value_column, "_parsed_date"]).sort_values("_parsed_date")
+
+    # Duplicate timestamps (e.g. two rows for the same day) would draw a
+    # jagged, misleading line — collapse them the same way the bar chart
+    # collapses duplicate labels.
+    if chart_df[label_column].duplicated().any():
+        chart_df = (
+            chart_df.groupby(label_column, as_index=False)
+            .agg({value_column: "sum", "_parsed_date": "first"})
+            .sort_values("_parsed_date")
+        )
 
     if len(chart_df) < 2:
         return render_bar_chart(df, label_column, value_column, len(df))
@@ -495,6 +538,10 @@ def render_trend_chart(df: pd.DataFrame, label_column: str, value_column: str):
     else:
         delta_class, delta_arrow = "down", "↓"
 
+    value_column_safe = _escape(value_column)
+    first_label_safe = _escape(labels[0])
+    last_label_safe = _escape(labels[-1])
+
     svg = f"""
     <svg viewBox="0 0 {width} {height}" width="100%" height="{height}" preserveAspectRatio="none">
         <defs>
@@ -519,12 +566,12 @@ def render_trend_chart(df: pd.DataFrame, label_column: str, value_column: str):
                 <span class="trend-latest-value">{_format_number(latest_value)}</span>
                 <span class="trend-delta {delta_class}">{delta_arrow} {_format_number(abs(delta))}</span>
             </div>
-            <div class="trend-latest-label">{value_column} · latest: {labels[-1]}</div>
+            <div class="trend-latest-label">{value_column_safe} · latest: {last_label_safe}</div>
         </div>
         {svg}
         <div style="display:flex; justify-content:space-between;">
-            <span class="trend-axis-label">{labels[0]}</span>
-            <span class="trend-axis-label">{labels[-1]}</span>
+            <span class="trend-axis-label">{first_label_safe}</span>
+            <span class="trend-axis-label">{last_label_safe}</span>
         </div>
     </div>
     """
@@ -556,8 +603,14 @@ def render_quick_chart(df: pd.DataFrame):
 # RESULT DISPLAY
 # ============================================================
 
-def display_results(result, elapsed=None):
-    """Display SQL, result table, metrics and small visualization."""
+def display_results(result, elapsed=None, key_suffix: str = "0"):
+    """Display SQL, result table, metrics and small visualization.
+
+    key_suffix must be unique per call site (e.g. the turn index in
+    history) since this renders a download_button — a Streamlit widget
+    that needs a stable, unique key when the same function runs more
+    than once per script run (replaying history) or across reruns.
+    """
 
     if not result.success:
 
@@ -670,6 +723,7 @@ def display_results(result, elapsed=None):
             data=csv_data,
             file_name="query_results.csv",
             mime="text/csv",
+            key=f"download_{key_suffix}",
         )
 
         # ----------------------------------------------------
@@ -687,7 +741,13 @@ def display_results(result, elapsed=None):
                 st.markdown("")
                 st.markdown("**📊 Quick Visualization**")
 
-                render_quick_chart(df)
+                # A single malformed row or unexpected dtype shouldn't
+                # take down the whole result view — the table and
+                # download button above are still useful on their own.
+                try:
+                    render_quick_chart(df)
+                except Exception as exc:
+                    st.caption(f"(Couldn't render a chart for this result: {exc})")
 
 
 # ============================================================
@@ -818,7 +878,7 @@ st.markdown(
 # REPLAY HISTORY
 # ============================================================
 
-for turn in st.session_state.history:
+for turn_index, turn in enumerate(st.session_state.history):
 
     with st.chat_message("user"):
         st.write(turn["question"])
@@ -827,6 +887,7 @@ for turn in st.session_state.history:
         display_results(
             turn["result"],
             turn.get("elapsed"),
+            key_suffix=f"history_{turn_index}",
         )
 
 
@@ -890,32 +951,34 @@ if question:
 
                 except Exception as exc:
 
-                    st.error(
-                        f"Unexpected error: {exc}"
+                    # Wrap the exception in the same result shape the
+                    # pipeline normally returns, so it flows through
+                    # display_results() and gets saved to history like
+                    # any other query instead of disappearing on the
+                    # next rerun (e.g. clicking a sidebar example).
+                    result = _ErrorResult(
+                        error=f"Unexpected error: {exc}"
                     )
-
-                    result = None
 
             elapsed = (
                 time.perf_counter()
                 - start_time
             )
 
-            if result is not None:
+            display_results(
+                result,
+                elapsed=elapsed,
+                key_suffix=f"live_{len(st.session_state.history)}",
+            )
 
-                display_results(
-                    result,
-                    elapsed=elapsed,
-                )
+            # ------------------------------------------------
+            # Save history
+            # ------------------------------------------------
 
-                # ------------------------------------------------
-                # Save history
-                # ------------------------------------------------
-
-                st.session_state.history.append(
-                    {
-                        "question": question,
-                        "result": result,
-                        "elapsed": elapsed,
-                    }
-                )
+            st.session_state.history.append(
+                {
+                    "question": question,
+                    "result": result,
+                    "elapsed": elapsed,
+                }
+            )
