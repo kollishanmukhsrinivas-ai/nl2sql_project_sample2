@@ -1,0 +1,106 @@
+{
+  "timestamp": "20260824_123645",
+  "passed": 3,
+  "total": 10,
+  "pass_rate": 30.0,
+  "total_elapsed_sec": 2123.1,
+  "avg_elapsed_sec": 212.3,
+  "flags": {
+    "quick": true,
+    "category": null,
+    "no_retry": true
+  },
+  "category_stats": {
+    "basic_categorical": {
+      "passed": 1,
+      "total": 1
+    },
+    "free_text_like": {
+      "passed": 0,
+      "total": 1
+    },
+    "aggregation": {
+      "passed": 0,
+      "total": 1
+    },
+    "single_hop_join": {
+      "passed": 1,
+      "total": 1
+    },
+    "multi_hop_join": {
+      "passed": 0,
+      "total": 1
+    },
+    "ranking": {
+      "passed": 0,
+      "total": 1
+    },
+    "date_logic": {
+      "passed": 0,
+      "total": 1
+    },
+    "complex_multi_table": {
+      "passed": 0,
+      "total": 1
+    },
+    "hallucination_trap": {
+      "passed": 0,
+      "total": 1
+    },
+    "edge_cases": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "failures": [
+    {
+      "category": "free_text_like",
+      "question": "employees who took leave for vacation",
+      "error": "Rejected unsafe SQL: Multiple SQL statements are not allowed in a single query.",
+      "sql": "To find employees who took leave for vacation, you can use the following SQL query:\n\n\nSELECT e.*\nFROM employees e\nJOIN leaves l ON e.emp_id = l.emp_id\nWHERE l.leave_type = 'Vacation'\nORDER BY l.start_date ASC;\n\n\nThis query joins the `employees` table with the `leaves` table on the `emp_id` column. It then filters the results to only include rows where the `leave_type` is 'Vacation'. Finally, it orders the results by the `start_date` in ascending order.\n\nNote: This query assumes that the `leave_type` column in the `leaves` table contains the string 'Vacation'. If the column contains different values, you may need to modify the query accordingly.\n\nAlso, if you want to get the number of employees who took leave for vacation, you can use the following query:\n\n\nSELECT COUNT(DISTINCT e.emp_id)\nFROM employees e\nJOIN leaves l ON e.emp_id = l.emp_id\nWHERE l.leave_type = 'Vacation';\n\n\nThis query counts the number of distinct `emp_id` values in the `employees` table where the `leave_type` is 'Vacation'.",
+      "elapsed": 61.1
+    },
+    {
+      "category": "aggregation",
+      "question": "average base salary by department",
+      "error": "Rejected unsafe SQL: Multiple SQL statements are not allowed in a single query.",
+      "sql": "To find the average base salary by department, you can use the following SQL query:\n\n\nSELECT \n  d.department_name, \n  AVG(s.base_salary) AS average_base_salary\nFROM \n  departments d\n  LEFT JOIN salaries s ON d.department_id = s.emp_id\nGROUP BY \n  d.department_name\nORDER BY \n  average_base_salary DESC;\n\n\nThis query joins the `departments` table with the `salaries` table on the `department_id` column, which is the foreign key in the `salaries` table referencing the `department_id` column in the `departments` table. The `LEFT JOIN` is used to include all departments, even if they don't have any salaries associated with them.\n\nThe `AVG` function is used to calculate the average base salary for each department. The results are grouped by the `department_name` column, and the average base salary is sorted in descending order.\n\nNote that this query assumes that the `base_salary` column in the `salaries` table represents the base salary for each employee, and that the `emp_id` column in the `salaries` table represents the employee ID. If this is not the case, you may need to modify the query accordingly.\n\nAlso, if you want to get the average base salary for each department, you can use the following query:\n\n\nSELECT \n  d.department_name, \n  AVG(s.base_salary) AS average_base_salary\nFROM \n  departments d\n  JOIN salaries s ON d.department_id = s.emp_id\nGROUP BY \n  d.department_name\nORDER BY \n  average_base_salary DESC;\n\n\nThis query uses an `INNER JOIN` instead of a `LEFT JOIN`, which means that only departments with at least one salary will be included in the results.",
+      "elapsed": 82.1
+    },
+    {
+      "category": "multi_hop_join",
+      "question": "average base salary per department",
+      "error": "Rejected unsafe SQL: Multiple SQL statements are not allowed in a single query.",
+      "sql": "To find the average base salary per department, you can use the following SQL query:\n\n\nSELECT \n  d.department_name, \n  AVG(s.base_salary) AS avg_base_salary\nFROM \n  departments d\n  LEFT JOIN salaries s ON d.department_id = s.emp_id\nGROUP BY \n  d.department_name\nORDER BY \n  avg_base_salary DESC;\n\n\nThis query joins the `departments` table with the `salaries` table on the `department_id` column, which is the foreign key in the `salaries` table referencing the `department_id` column in the `departments` table. The `LEFT JOIN` is used to include all departments, even if they don't have any salaries associated with them.\n\nThe `AVG` function is then used to calculate the average base salary for each department. The results are grouped by department name, and the average base salary is sorted in descending order.\n\nNote that this query assumes that the `base_salary` column in the `salaries` table represents the base salary for each employee, and that the `emp_id` column in the `salaries` table represents the employee ID. If this is not the case, you may need to modify the query accordingly.\n\nAlso, if you want to get the average base salary per department for the current year, you can modify the query as follows:\n\n\nSELECT \n  d.department_name, \n  AVG(s.base_salary) AS avg_base_salary\nFROM \n  departments d\n  LEFT JOIN salaries s ON d.department_id = s.emp_id\nWHERE \n  s.effective_from >= CURRENT_DATE\nGROUP BY \n  d.department_name\nORDER BY \n  avg_base_salary DESC;\n\n\nThis query adds a `WHERE` clause to filter the salaries to only include those that are effective from the current year or later.",
+      "elapsed": 74.7
+    },
+    {
+      "category": "ranking",
+      "question": "top 3 highest paid employees",
+      "error": "Rejected unsafe SQL: Multiple SQL statements are not allowed in a single query.",
+      "sql": "To find the top 3 highest paid employees, you can use the following SQL query:\n\n\nSELECT TOP 3 e.emp_id, e.employee_code, e.first_name, e.last_name, e.salary\nFROM employees e\nORDER BY e.salary DESC;\n\n\nThis query selects the top 3 rows from the `employees` table based on the `salary` column in descending order. The `TOP 3` clause is used to limit the number of rows returned to 3.\n\nHowever, this query does not take into account the bonuses and allowances that may be included in the salary. To get the total compensation, you would need to join the `salaries` table and calculate the total salary by adding the base salary, bonus, and allowance.\n\nHere's an updated query that takes into account the bonuses and allowances:\n\n\nSELECT TOP 3 e.emp_id, e.employee_code, e.first_name, e.last_name, s.total_salary\nFROM employees e\nJOIN salaries s ON e.emp_id = s.emp_id\nORDER BY s.total_salary DESC;\n\n\nThis query joins the `employees` table with the `salaries` table on the `emp_id` column. It then calculates the total salary by adding the base salary, bonus, and allowance, and orders the results in descending order by total salary.\n\nNote that the `total_salary` column is calculated as `s.total_salary = s.base_salary + s.bonus + s.allowance`. This assumes that the `salaries` table has columns for `base_salary`, `bonus`, and `allowance`.",
+      "elapsed": 68.1
+    },
+    {
+      "category": "date_logic",
+      "question": "employees hired in the last 5 years",
+      "error": "Rejected unsafe SQL: Multiple SQL statements are not allowed in a single query.",
+      "sql": "To find employees hired in the last 5 years, you can use the following SQL query:\n\n\nSELECT *\nFROM employees\nWHERE hire_date >= DATE_SUB(CURRENT_DATE, INTERVAL 5 YEAR);\n\n\nThis query uses the `DATE_SUB` function to subtract 5 years from the current date, and then selects all columns (`*`) from the `employees` table where the `hire_date` is greater than or equal to the result of the subtraction.\n\nNote: The `DATE_SUB` function is used to subtract a specified interval from a date. The `INTERVAL` keyword is used to specify the interval in years, months, days, hours, minutes, and seconds.\n\nAlso, if you want to get the count of employees hired in the last 5 years, you can use the following query:\n\n\nSELECT COUNT(*)\nFROM employees\nWHERE hire_date >= DATE_SUB(CURRENT_DATE, INTERVAL 5 YEAR);\n\n\nThis query will return the count of employees hired in the last 5 years.",
+      "elapsed": 66.7
+    },
+    {
+      "category": "complex_multi_table",
+      "question": "which employees have received a promotion and subsequently had a performance review, and what was their salary increase compared to their performance rating",
+      "error": "Rejected unsafe SQL: Multiple SQL statements are not allowed in a single query.",
+      "sql": "To answer this question, we need to join the `employees`, `promotions`, and `performance_reviews` tables based on the `emp_id` column. We also need to calculate the salary increase compared to the performance rating.\n\n\nSELECT \n  e.emp_id,\n  e.first_name,\n  e.last_name,\n  p.promotion_date,\n  pr.review_date,\n  pr.overall_rating,\n  p.new_salary - pr.overall_rating * 10000 AS salary_increase\nFROM \n  employees e\n  JOIN promotions p ON e.emp_id = p.emp_id\n  JOIN performance_reviews pr ON e.emp_id = pr.emp_id\nWHERE \n  p.promotion_date IS NOT NULL\n  AND pr.review_date IS NOT NULL\n  AND p.new_salary > p.old_salary;\n\n\nThis query will return the employee's ID, first name, last name, promotion date, review date, overall rating, and salary increase compared to the performance rating.\n\nNote:\n\n* We assume that the salary increase is calculated as a percentage of the overall rating, where 10000 is the maximum possible rating.\n* We use the `JOIN` clause to join the three tables based on the `emp_id` column.\n* We use the `WHERE` clause to filter the results to only include employees who have received a promotion and have a performance review.\n* We use the `p.new_salary - pr.overall_rating * 10000` expression to calculate the salary increase compared to the performance rating.",
+      "elapsed": 653.4
+    },
+    {
+      "category": "hallucination_trap",
+      "question": "top 5 customers by total order amount",
+      "error": "Query execution failed: (pymysql.err.ProgrammingError) (1146, \"Table 'emp.customers' doesn't exist\")\n[SQL: SELECT customers.customer_id, customers.customer_name, SUM(orders.order_amount) AS total_order_amount FROM customers AS customers INNER JOIN orders AS orders ON customers.customer_id = orders.customer_id GROUP BY customers.customer_id, customers.customer_name ORDER BY total_order_amount DESC LIMIT 5]\n(Background on this error at: https://sqlalche.me/e/20/f405)",
+      "sql": "SELECT customers.customer_id, customers.customer_name, SUM(orders.order_amount) AS total_order_amount FROM customers AS customers INNER JOIN orders AS orders ON customers.customer_id = orders.customer_id GROUP BY customers.customer_id, customers.customer_name ORDER BY total_order_amount DESC LIMIT 5",
+      "elapsed": 113.4
+    }
+  ]
+}

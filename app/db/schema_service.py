@@ -17,15 +17,11 @@ network calls — pure string matching, so it works fully offline.
 """
 import re
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from app.db.database_service import get_engine
 
 
-# Common English words that cause false-positive matches against
-# column names (e.g. "is" matching "is_primary", "on" matching a
-# column with "on" in it). Filtered out of the QUESTION only — table
-# vocabularies are left untouched.
 _STOPWORDS = {
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
     "who", "whom", "what", "which", "where", "when", "why", "how",
@@ -36,27 +32,11 @@ _STOPWORDS = {
 }
 
 
-def _tokenize(text: str) -> set[str]:
-    """Splits on non-alphanumeric characters and lowercases, e.g.
-    'base_salary' -> {'base', 'salary'}."""
-    return set(re.split(r"[^a-z0-9]+", text.lower())) - {""}
+def _tokenize(text_value: str) -> set[str]:
+    return set(re.split(r"[^a-z0-9]+", text_value.lower())) - {""}
 
 
 def _build_table_metadata(inspector) -> dict:
-    """
-    For every table, returns:
-      - pk_columns: set of primary key column names
-      - fk_map: local_column -> "referred_table.referred_column"
-      - fk_neighbors: set of table names this table has an FK relationship with
-        (in either direction)
-      - vocabulary: set of tokens derived from the table name and its own
-        real (non-FK) column names, used for keyword matching against a
-        question. FK columns are excluded from vocabulary because they
-        just link to another table's rows (e.g. department_id on
-        employees) and shouldn't make THIS table match a question about
-        that OTHER table's actual topic.
-      - columns: raw column list from the inspector
-    """
     table_names = inspector.get_table_names()
     metadata = {}
 
@@ -86,9 +66,6 @@ def _build_table_metadata(inspector) -> dict:
             "columns": columns,
         }
 
-    # Make FK relationships symmetric (if A references B, B should also
-    # know it's connected to A) so the 1-hop expansion below works both
-    # ways.
     for table_name, meta in metadata.items():
         for neighbor in list(meta["fk_neighbors"]):
             if neighbor in metadata:
@@ -98,14 +75,6 @@ def _build_table_metadata(inspector) -> dict:
 
 
 def _select_relevant_tables(question: str, metadata: dict) -> set[str]:
-    """
-    Returns the set of table names relevant to `question`, based on
-    keyword overlap with each table's vocabulary, expanded one hop via
-    foreign keys so joins between matched tables still work.
-
-    Falls back to ALL tables if nothing matches (safety net — never
-    silently hide a table the question actually needed).
-    """
     question_tokens = _tokenize(question) - _STOPWORDS
     if not question_tokens:
         return set(metadata.keys())
@@ -143,23 +112,6 @@ def _format_table(table_name: str, meta: dict) -> list[str]:
 
 
 def get_schema_description(question: str | None = None) -> str:
-    """
-    Returns a plain-text schema description like:
-
-        Table: customers
-          Columns: customer_id (INTEGER, PK), name (TEXT), email (TEXT)
-        Table: orders
-          Columns: order_id (INTEGER, PK), customer_id (INTEGER, FK -> customers.customer_id), ...
-
-    This is what gets embedded in the LLM prompt so SQL generation is
-    grounded in the real, current schema instead of a hard-coded one.
-
-    If `question` is provided, only tables relevant to it (by keyword
-    match, expanded one hop via foreign keys) are included — this
-    shrinks the prompt and reduces irrelevant-table confusion for
-    smaller models. Pass question=None (or omit it) to always get the
-    full schema, e.g. for debugging.
-    """
     engine = get_engine()
     inspector = inspect(engine)
 
@@ -185,16 +137,10 @@ def get_schema_description(question: str | None = None) -> str:
 
 
 def list_tables() -> list[str]:
-    """Convenience helper — used by health-check / debugging endpoints."""
     return inspect(get_engine()).get_table_names()
+
+
 def get_exclusive_columns() -> dict[str, str]:
-    """
-    Returns {column_name: table_name} for every column name that
-    appears in exactly ONE table across the whole database. These are
-    the columns worth telling the model "this lives ONLY here" about —
-    computed fresh from whatever schema is actually connected, so it
-    stays correct even if columns move, get renamed, or tables change.
-    """
     engine = get_engine()
     inspector = inspect(engine)
     metadata = _build_table_metadata(inspector)
@@ -211,15 +157,44 @@ def get_exclusive_columns() -> dict[str, str]:
     }
 
 
+def get_sample_values(max_distinct: int = 8) -> dict[str, list[str]]:
+    """
+    Returns {"table.column": [sample values]} for VARCHAR/TEXT columns
+    with low cardinality (<= max_distinct distinct values). Narrative
+    free-text columns are excluded even if they happen to have few
+    distinct values in a small dataset, since they're searched with
+    LIKE, not matched exactly.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+    result = {}
+    free_text_markers = (
+        "description", "comment", "remark", "note",
+        "goal", "strength", "weakness", "certificate",
+        "address", "reason",
+    )
+    with engine.connect() as conn:
+        for table_name in inspector.get_table_names():
+            for col in inspector.get_columns(table_name):
+                col_type = str(col["type"]).upper()
+                if "CHAR" not in col_type and "TEXT" not in col_type:
+                    continue
+                name = col["name"].lower()
+                if any(marker in name for marker in free_text_markers):
+                    continue
+                rows = conn.execute(
+                    text(
+                        f"SELECT DISTINCT `{col['name']}` FROM `{table_name}` "
+                        f"WHERE `{col['name']}` IS NOT NULL LIMIT {max_distinct + 1}"
+                    )
+                ).fetchall()
+                values = [r[0] for r in rows]
+                if 1 <= len(values) <= max_distinct:
+                    result[f"{table_name}.{col['name']}"] = values
+    return result
+
+
 def get_composite_name_tables() -> dict[str, tuple[str, str]]:
-    """
-    Returns {table_name: (first_name_col, last_name_col)} for every
-    table that has separate first/last name columns but NO single
-    combined 'name' column — the exact shape that causes models to
-    hallucinate a nonexistent `.name` column. Computed fresh from the
-    live schema, so it adapts automatically if this table gets renamed
-    or a differently-shaped employee table replaces it.
-    """
     engine = get_engine()
     inspector = inspect(engine)
     metadata = _build_table_metadata(inspector)

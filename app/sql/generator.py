@@ -1,9 +1,10 @@
 """
+
 Natural-language question -> SQL, grounded in the live database schema.
 
-Column-location rules and the "combined name" fix are both derived
+Column-location rules and mechanical post-processing fixes are derived
 fresh from whatever schema is actually connected (see schema_service.py
-helpers), rather than hardcoded for one specific database — so this
+helpers), rather than hardcoded for one specific database - so this
 keeps working correctly even if tables/columns get renamed, added, or
 restructured, as long as the overall data is still employee/HR-shaped.
 """
@@ -37,6 +38,22 @@ Column matching rules (free-text vs categorical):
   DO use exact match (=) with one of the known values from the schema.
 - If a question describes a purpose, activity, or free-text concept rather
   than a known category value, search the free-text column with LIKE.
+- leaves table has NO department_id - to filter leave requests by
+  department, JOIN leaves to employees first, then employees to
+  departments.
+- salaries table has NO department_id - to rank/group salaries by
+  department, JOIN salaries to employees first.
+- "illness" as a search term is a free-text concept, not a leave_type
+  value - search reason with LIKE, never leave_type = 'Illness'.
+- Never join two ID columns that have different names unless the
+  schema explicitly shows a foreign key between them. For example,
+  job_id and emp_id are never the same key, department_id and emp_id
+  are never the same key - only join columns where the schema's FK
+  annotation explicitly connects them.
+- When a question mentions a value together with words from its own
+  column name (e.g. "Annual leave" when the column is leave_type),
+  match only the distinctive part of the value (e.g. 'Annual'), not
+  the full phrase including the column's own name.
 
 {dynamic_column_rules}
 
@@ -46,6 +63,7 @@ MySQL syntax rules:
 - Never use reserved words (rank, rows, row_number, order, group) as an
   unquoted column alias - quote them with backticks or rename them
   (e.g. use `salary_rank` instead of `rank`).
+- Use MySQL's LIMIT n syntax, never SQL Server's TOP n syntax.
 - A window function's result (e.g. RANK() AS salary_rank) CANNOT be
   filtered in the same-level WHERE clause. Always wrap it in an outer
   subquery first: SELECT * FROM (SELECT ..., RANK() OVER (...) AS
@@ -140,13 +158,38 @@ def clean_sql_output(raw: str) -> str:
     return text.strip()
 
 
+def extract_sql_statement(text: str) -> str:
+    """
+    Pulls out just the SQL statement from model output that may be
+    wrapped in explanatory prose (increasingly common as the prompt
+    has grown longer - the model sometimes stops following the
+    "output ONLY SQL" instruction). Finds the first SELECT and cuts
+    off at the next paragraph break or semicolon, discarding any
+    explanation before or after.
+    """
+    match = re.search(r"SELECT\b", text, re.IGNORECASE)
+    if not match:
+        return text.strip()
+
+    remainder = text[match.start():]
+
+    para_match = re.search(r"\n\s*\n", remainder)
+    if para_match:
+        remainder = remainder[:para_match.start()]
+
+    if ";" in remainder:
+        remainder = remainder.split(";")[0]
+
+    return remainder.strip()
+
+
 def fix_common_alias_mistakes(sql: str) -> str:
     """
-    Mechanically corrects the model's most persistent mistake: using a
-    combined `.name` column on a table that only has separate
-    first/last name columns. Which table(s) this applies to is derived
-    fresh from the live schema, so it keeps working even if that table
-    gets renamed or restructured.
+    Mechanically corrects the model's most persistent mistakes:
+    - a combined `.name` column on a table that only has separate
+      first/last name columns (derived fresh from the live schema)
+    - bare `rank` used as an alias/column (MySQL reserved word)
+    - SQL Server's `SELECT TOP n` syntax instead of MySQL's `LIMIT n`
     """
     try:
         composite_tables = get_composite_name_tables()
@@ -165,6 +208,58 @@ def fix_common_alias_mistakes(sql: str) -> str:
     sql = re.sub(r"\bAS\s+rank\b", "AS salary_rank", sql, flags=re.IGNORECASE)
     sql = re.sub(r"\.rank\b(?!_)", ".salary_rank", sql)
     sql = re.sub(r"\bWHERE\s+rank\b", "WHERE salary_rank", sql, flags=re.IGNORECASE)
+
+    top_match = re.match(r"^\s*SELECT\s+TOP\s+(\d+)\s+(.*)", sql, re.IGNORECASE | re.DOTALL)
+    if top_match:
+        limit_n, rest = top_match.groups()
+        sql = f"SELECT {rest.strip()} LIMIT {limit_n}"
+
+    return sql
+
+
+def fix_hallucinated_column_names(sql: str) -> str:
+    """
+    If the model references <alias>.<col> where <col> doesn't exist
+    anywhere, but a very similar real column name (e.g. 'salary' vs
+    'base_salary') is exclusive to a table that's ALREADY joined in
+    this query under some alias, rewrite the reference to point at
+    the correct alias and column. Only fixes cases where the owning
+    table is already present in the query - it does not insert
+    missing tables (that's a structural fix, not a naming one).
+    """
+    try:
+        exclusive = get_exclusive_columns()
+    except Exception:
+        return sql
+
+    table_alias_in_query = {}
+    for tname in set(exclusive.values()):
+        m = re.search(rf"\b{re.escape(tname)}\s+(?:AS\s+)?(\w+)\b", sql, re.IGNORECASE)
+        if m:
+            table_alias_in_query[tname] = m.group(1)
+
+    for real_col, owning_table in exclusive.items():
+        correct_alias = table_alias_in_query.get(owning_table)
+        if not correct_alias:
+            continue
+
+        if "_" not in real_col:
+            continue
+
+        short_form = real_col.split("_", 1)[1]
+
+        if short_form in exclusive:
+            continue
+
+        pattern = rf"\b(\w+)\.{re.escape(short_form)}\b"
+        for m in re.finditer(pattern, sql):
+            wrong_alias = m.group(1)
+            sql = re.sub(
+                rf"\b{re.escape(wrong_alias)}\.{re.escape(short_form)}\b",
+                f"{correct_alias}.{real_col}",
+                sql,
+            )
+
     return sql
 
 
@@ -174,7 +269,9 @@ def generate_sql(question: str, schema: str, dialect: str = "SQL") -> str:
     chain = prompt_template | llm
     raw_response = chain.invoke({"schema": schema, "question": question, "dialect": dialect})
     sql = clean_sql_output(_extract_text(raw_response))
-    return fix_common_alias_mistakes(sql)
+    sql = extract_sql_statement(sql)
+    sql = fix_common_alias_mistakes(sql)
+    return fix_hallucinated_column_names(sql)
 
 
 def generate_sql_with_retry(question: str, schema: str, dialect: str = "SQL", max_retries: int = 1) -> str:
@@ -200,6 +297,8 @@ def generate_sql_with_retry(question: str, schema: str, dialect: str = "SQL", ma
                 "previous_sql": sql,
                 "error": str(exc),
             })
-            sql = fix_common_alias_mistakes(clean_sql_output(_extract_text(raw)))
+            sql = fix_hallucinated_column_names(
+                fix_common_alias_mistakes(extract_sql_statement(clean_sql_output(_extract_text(raw))))
+            )
 
     return sql

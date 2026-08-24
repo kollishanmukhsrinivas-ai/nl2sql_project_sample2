@@ -37,7 +37,9 @@ def get_llm():
             base_url=cfg.ollama_base_url,
             temperature=cfg.temperature,
             num_ctx=cfg.ollama_num_ctx,
-            keep_alive=cfg.ollama_keep_alive, 
+            keep_alive=cfg.ollama_keep_alive,
+            num_predict=256,
+            request_timeout=120,  
         )
 
     if cfg.provider == "groq":

@@ -1,0 +1,176 @@
+{
+  "timestamp": "20260824_152147",
+  "passed": 10,
+  "total": 27,
+  "pass_rate": 37.0,
+  "total_elapsed_sec": 8086.4,
+  "avg_elapsed_sec": 299.5,
+  "flags": {
+    "quick": false,
+    "category": null,
+    "no_retry": false
+  },
+  "category_stats": {
+    "basic_categorical": {
+      "passed": 3,
+      "total": 3
+    },
+    "free_text_like": {
+      "passed": 1,
+      "total": 2
+    },
+    "aggregation": {
+      "passed": 3,
+      "total": 3
+    },
+    "single_hop_join": {
+      "passed": 2,
+      "total": 2
+    },
+    "multi_hop_join": {
+      "passed": 1,
+      "total": 2
+    },
+    "ranking": {
+      "passed": 0,
+      "total": 3
+    },
+    "date_logic": {
+      "passed": 0,
+      "total": 2
+    },
+    "complex_multi_table": {
+      "passed": 0,
+      "total": 3
+    },
+    "hallucination_trap": {
+      "passed": 0,
+      "total": 2
+    },
+    "edge_cases": {
+      "passed": 0,
+      "total": 5
+    }
+  },
+  "failures": [
+    {
+      "category": "free_text_like",
+      "question": "who took leave due to illness",
+      "error": "correctness check failed: weak check: query succeeded but returned 0 rows (no 'expected' set for this question, so this may be a false alarm -- verify by hand)",
+      "sql": "SELECT emp_id FROM leaves WHERE leave_type = 'Illness'",
+      "elapsed": 5.0
+    },
+    {
+      "category": "multi_hop_join",
+      "question": "which employees have pending leave requests along with their department",
+      "error": "Query execution failed: (pymysql.err.OperationalError) (1054, \"Unknown column 'l.department_id' in 'on clause'\")\n[SQL: SELECT e.emp_id, e.employee_code, e.first_name, e.last_name, d.department_name\nFROM employees e\nJOIN leaves l ON e.emp_id = l.emp_id\nJOIN departments d ON l.department_id = d.department_id\nWHERE l.status = 'Pending']\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      "sql": "SELECT e.emp_id, e.employee_code, e.first_name, e.last_name, d.department_name\nFROM employees e\nJOIN leaves l ON e.emp_id = l.emp_id\nJOIN departments d ON l.department_id = d.department_id\nWHERE l.status = 'Pending'",
+      "elapsed": 127.3
+    },
+    {
+      "category": "ranking",
+      "question": "top 3 highest paid employees",
+      "error": "Query execution failed: (pymysql.err.ProgrammingError) (1064, \"You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '3 e.emp_id, e.employee_code, e.first_name, e.last_name, s.total_salary\\nFROM empl' at line 1\")\n[SQL: SELECT TOP 3 e.emp_id, e.employee_code, e.first_name, e.last_name, s.total_salary\nFROM employees e\nJOIN salaries s ON e.emp_id = s.emp_id\nORDER BY s.total_salary DESC]\n(Background on this error at: https://sqlalche.me/e/20/f405)",
+      "sql": "SELECT TOP 3 e.emp_id, e.employee_code, e.first_name, e.last_name, s.total_salary\nFROM employees e\nJOIN salaries s ON e.emp_id = s.emp_id\nORDER BY s.total_salary DESC",
+      "elapsed": 138.0
+    },
+    {
+      "category": "ranking",
+      "question": "employee with the second-highest base_salary in each department",
+      "error": "Query execution failed: (pymysql.err.OperationalError) (1054, \"Unknown column 'department_id' in 'field list'\")\n[SQL: SELECT e.emp_id, CONCAT(e.first_name, ' ', e.last_name), e.base_salary\nFROM employees e\nJOIN (\n  SELECT department_id, base_salary,\n         DENSE_RANK() OVER (PARTITION BY department_id ORDER BY base_salary DESC) AS salary_rank\n  FROM salaries\n) s ON e.emp_id = s.emp_id\nWHERE s.salary_rank = 1]\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      "sql": "SELECT e.emp_id, CONCAT(e.first_name, ' ', e.last_name), e.base_salary\nFROM employees e\nJOIN (\n  SELECT department_id, base_salary,\n         DENSE_RANK() OVER (PARTITION BY department_id ORDER BY base_salary DESC) AS salary_rank\n  FROM salaries\n) s ON e.emp_id = s.emp_id\nWHERE s.salary_rank = 1",
+      "elapsed": 164.0
+    },
+    {
+      "category": "ranking",
+      "question": "Rank employees within each department by base_salary and show only rank 1 and rank 2",
+      "error": "The LLM failed to respond: peer closed connection without sending complete message body (incomplete chunked read)",
+      "sql": null,
+      "elapsed": 6790.2
+    },
+    {
+      "category": "date_logic",
+      "question": "employees hired in the last 5 years",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    },
+    {
+      "category": "date_logic",
+      "question": "leave requests submitted more than 10 days before the start date",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.1
+    },
+    {
+      "category": "complex_multi_table",
+      "question": "which employees have received a promotion and subsequently had a performance review, and what was their salary increase compared to their performance rating",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.1
+    },
+    {
+      "category": "complex_multi_table",
+      "question": "For each employee, determine whether their current salary is consistent with their current job's minimum and maximum salary range",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.1
+    },
+    {
+      "category": "complex_multi_table",
+      "question": "Find the department where the ratio of pending to approved leave requests is highest",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.1
+    },
+    {
+      "category": "hallucination_trap",
+      "question": "top 5 customers by total order amount",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.1
+    },
+    {
+      "category": "hallucination_trap",
+      "question": "employees by performance rating category that does not exist",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    },
+    {
+      "category": "edge_cases",
+      "question": "employees hired in the year 2099",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    },
+    {
+      "category": "edge_cases",
+      "question": "show me the data",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    },
+    {
+      "category": "edge_cases",
+      "question": "wat employes r on sick leave",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    },
+    {
+      "category": "edge_cases",
+      "question": "employees without a manager assigned",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    },
+    {
+      "category": "edge_cases",
+      "question": "employees'; DROP TABLE employees;--",
+      "error": "The LLM failed to respond: [Errno 111] Connection refused",
+      "sql": null,
+      "elapsed": 0.2
+    }
+  ]
+}
