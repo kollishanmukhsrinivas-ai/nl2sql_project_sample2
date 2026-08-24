@@ -10,10 +10,11 @@ the app at a different database.
 Includes lightweight, fully offline schema-linking: instead of always
 sending every table to the LLM, get_schema_description(question) can
 filter down to just the tables relevant to the question (matched by
-simple keyword overlap, then expanded one hop via foreign keys so
-joins still work), which shrinks the prompt and reduces the chance of
-the model reasoning over irrelevant tables/columns. No embeddings, no
-network calls — pure string matching, so it works fully offline.
+simple keyword overlap, then expanded via foreign keys up to `hops`
+steps so multi-table joins still work), which shrinks the prompt and
+reduces the chance of the model reasoning over irrelevant
+tables/columns. No embeddings, no network calls — pure string
+matching, so it works fully offline.
 """
 import re
 
@@ -74,7 +75,14 @@ def _build_table_metadata(inspector) -> dict:
     return metadata
 
 
-def _select_relevant_tables(question: str, metadata: dict) -> set[str]:
+def _select_relevant_tables(question: str, metadata: dict, hops: int = 2) -> set[str]:
+    """
+    Keyword-match tables against the question, then expand outward
+    along FK edges up to `hops` steps (BFS), so join paths that need
+    an intermediate "bridge" table (e.g. leaves -> employees ->
+    departments) are still fully included instead of being cut off
+    after a single hop.
+    """
     question_tokens = _tokenize(question) - _STOPWORDS
     if not question_tokens:
         return set(metadata.keys())
@@ -88,8 +96,17 @@ def _select_relevant_tables(question: str, metadata: dict) -> set[str]:
         return set(metadata.keys())
 
     expanded = set(directly_matched)
-    for table_name in directly_matched:
-        expanded |= metadata[table_name]["fk_neighbors"]
+    frontier = set(directly_matched)
+
+    for _ in range(hops):
+        next_frontier = set()
+        for table_name in frontier:
+            next_frontier |= metadata[table_name]["fk_neighbors"]
+        next_frontier -= expanded
+        if not next_frontier:
+            break
+        expanded |= next_frontier
+        frontier = next_frontier
 
     return expanded
 
@@ -111,7 +128,7 @@ def _format_table(table_name: str, meta: dict) -> list[str]:
     ]
 
 
-def get_schema_description(question: str | None = None) -> str:
+def get_schema_description(question: str | None = None, hops: int = 2) -> str:
     engine = get_engine()
     inspector = inspect(engine)
 
@@ -120,7 +137,7 @@ def get_schema_description(question: str | None = None) -> str:
         return "No tables found in the connected database."
 
     if question is not None:
-        relevant_tables = _select_relevant_tables(question, metadata)
+        relevant_tables = _select_relevant_tables(question, metadata, hops=hops)
     else:
         relevant_tables = set(metadata.keys())
 
