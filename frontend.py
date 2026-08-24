@@ -822,12 +822,21 @@ with st.sidebar:
 
     st.markdown("### 💡 Examples")
 
-    examples = [
-        "Top 5 customers by total order amount",
-        "How many orders per city?",
-        "Average product price by category",
-        "Orders with more than 1 item",
-    ]
+        # Examples are generated from whatever tables are actually in the
+    # connected database — never hardcoded — so they stay valid no
+    # matter what schema this app is pointed at (local, remote,
+    # different domain entirely).
+    try:
+        from app.db.schema_service import list_tables
+
+        available_tables = list_tables()
+        examples = [
+            f"Show me the first 5 rows from {table}"
+            for table in available_tables[:4]
+        ] or ["Ask a question about your data"]
+
+    except Exception:
+        examples = ["Ask a question about your data"]
 
     for index, example in enumerate(examples):
 

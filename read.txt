@@ -156,3 +156,4 @@ If this fails, the error message tells you exactly what's wrong — see Section 
 
 
 to run -uv run streamlit run frontend.py
+to run test cases-uv run python test_questions.py

@@ -28,7 +28,7 @@ class QueryResult:
     error: str | None = None
 
 
-def get_data_from_database(question: str) -> QueryResult:
+def get_data_from_database(question: str, max_retries: int = 1) -> QueryResult:
     """
     Main entry point used by the frontend. Never raises — always
     returns a QueryResult, with .error set on any failure.
@@ -46,7 +46,7 @@ def get_data_from_database(question: str) -> QueryResult:
 
     # 2. LLM: natural language -> SQL
     try:
-        sql = generate_sql_with_retry(question, schema, dialect=dialect, max_retries=1)
+        sql = generate_sql_with_retry(question, schema, dialect=dialect, max_retries=max_retries)
     except LLMConfigError as exc:
         return QueryResult(success=False, question=question, error=f"LLM configuration error: {exc}")
     except Exception as exc:  # LLM/network failures of any kind
