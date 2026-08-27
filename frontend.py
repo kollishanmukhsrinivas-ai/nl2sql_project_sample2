@@ -14,7 +14,7 @@ from app.pipeline import get_data_from_database
 # ============================================================
 
 st.set_page_config(
-    page_title="Data Analyst",
+    page_title="NL2SQL — Query Interface",
     page_icon="🔷",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1208,7 +1208,7 @@ st.markdown(
 )
 
 st.markdown(
-    '<p class="app-title">AI Data Analyst</p>',
+    '<p class="app-title">NL2SQL Engine</p>',
     unsafe_allow_html=True,
 )
 
@@ -1219,8 +1219,8 @@ st.markdown(
 
 st.markdown(
     '<p class="app-subtitle">'
-    'Ask your database a question in plain English. '
-    'Press Enter to run it.'
+    'A schema-aware natural language to SQL system. '
+    'Ask a question, see the generated query and results.'
     '</p>',
     unsafe_allow_html=True,
 )
@@ -1349,7 +1349,7 @@ if question:
 
             # ------------------------------------------------
             # Save history
-            # ------------------------------------------------
+            # -------------------------------------------------
 
             st.session_state.history.append(
                 {
