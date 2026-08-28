@@ -191,4 +191,39 @@ shanmukhsrinivas-kolli@shanmukhsrinivas-kolli:~/project-drdl/nl2sql_project_samp
   Network URL: http://192.168.1.3:8501
 
 
+
+how to chagge database--------
+so if i perform change's in .env file that is enough to change database connction settings (need not to change any where)
+
+That's the design intent — yes, correct. Changing .env is enough; you never touch config.py, database_service.py, schema_service.py, or any other code file to switch databases.
+
+One important detail though: you do need to restart the app after editing .env — Streamlit's auto-reload only re-runs your script on save, but environment variables and the cached database engine are loaded once when the process starts, not on every rerun.
+
+
+1
+Edit .env with your new database settings (e.g. change DB_TYPE=sqlite to DB_TYPE=mysql plus DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD). Save the file.
+
+
+2
+In the terminal where Streamlit is running, press Ctrl+C to stop it completely.
+
+3
+Run: uv run streamlit run frontend.py — this starts a fresh process that reads the new .env values from scratch.
+
+4
+The sidebar 'Connection' panel will now show the new database type/host — that confirms the switch took effect. Ask a question to verify the schema/results come from the new database.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   done finally by k.shanmukhsrinivas
