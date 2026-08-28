@@ -14,8 +14,8 @@ from app.pipeline import get_data_from_database
 # ============================================================
 
 st.set_page_config(
-    page_title="NL2SQL — Query Interface",
-    page_icon="🔷",
+    page_title="NL2SQL",
+    page_icon="🗄️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
